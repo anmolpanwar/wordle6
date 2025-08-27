@@ -1,0 +1,460 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sixle — a 6-letter Wordle clone</title>
+  <meta name="description" content="A 6-letter Wordle-style game (single file) with animations and on-screen keyboard." />
+  <style>
+    :root{
+      --bg:#121213;
+      --text:#d7dadc;
+      --tile-border:#3a3a3c;
+      --key-bg:#818384;
+      --key-text:#fff;
+      --key-border:#565758;
+
+      --color-correct:#538d4e; /* green  */
+      --color-present:#b59f3b; /* yellow */
+      --color-absent:#3a3a3c; /* gray   */
+
+      --tile-size:58px;
+      --tile-gap:8px;
+      --board-pad:12px;
+      --kbd-height:210px;
+      --anim-ms:520ms;
+    }
+
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0;
+      background:var(--bg);
+      color:var(--text);
+      font:16px/1.4 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Helvetica,Arial,sans-serif;
+      display:flex; flex-direction:column; align-items:center;
+    }
+
+    header{
+      width:100%;
+      max-width:520px;
+      display:flex; align-items:center; justify-content:space-between;
+      padding:10px 16px;
+      border-bottom:1px solid var(--tile-border);
+    }
+    header h1{
+      font-size:20px; letter-spacing:1px; margin:6px 0; font-weight:700;
+    }
+    header button{
+      background:transparent; color:var(--text); border:1px solid var(--tile-border);
+      padding:8px 10px; border-radius:10px; cursor:pointer;
+    }
+    header button:hover{border-color:#6a6a6b}
+
+    main{
+      width:100%;
+      max-width:520px;
+      padding:16px;
+      display:flex; flex-direction:column; align-items:center; gap:16px;
+    }
+
+    /* Board */
+    .board{
+      padding:var(--board-pad);
+      display:grid; gap:var(--tile-gap);
+      grid-template-rows: repeat(6, var(--tile-size));
+      grid-template-columns: repeat(6, var(--tile-size));
+      justify-content:center; /* center grid */
+    }
+    .tile{
+      width:var(--tile-size); height:var(--tile-size);
+      display:flex; align-items:center; justify-content:center;
+      border:2px solid var(--tile-border);
+      font-weight:700; font-size:24px; text-transform:uppercase;
+      user-select:none;
+      transition:border-color .15s ease, background-color .15s ease;
+      will-change:transform, background-color, border-color;
+      perspective:1000px;
+      background:#121213;
+    }
+    .tile.filled{border-color:#565758}
+    .tile.revealed.correct{background:var(--color-correct); border-color:var(--color-correct); color:#fff}
+    .tile.revealed.present{background:var(--color-present); border-color:var(--color-present); color:#fff}
+    .tile.revealed.absent{background:var(--color-absent); border-color:var(--color-absent); color:#fff}
+
+    /* tile animations */
+    @keyframes pop-in {
+      0%{transform:scale(0.92)}
+      40%{transform:scale(1.08)}
+      100%{transform:scale(1)}
+    }
+    .tile.pop{animation:pop-in 110ms ease}
+    @keyframes flip {
+      0%{transform:rotateX(0)}
+      49%{transform:rotateX(90deg)}
+      51%{transform:rotateX(90deg)}
+      100%{transform:rotateX(0)}
+    }
+    .tile.flip{animation:flip var(--anim-ms) ease forwards}
+    @keyframes shake {
+      10%, 30%, 50%, 70%, 90% { transform: translateX(-6px) }
+      20%, 40%, 60%, 80% { transform: translateX(6px) }
+      0%, 100%{ transform: translateX(0) }
+    }
+    .row.shake{animation:shake 400ms ease}
+
+    @keyframes bounce {
+      0%, 100% { transform: translateY(0) }
+      30% { transform: translateY(-10px) }
+      60% { transform: translateY(2px) }
+    }
+    .tile.bounce{animation:bounce 650ms ease}
+
+    /* Keyboard */
+    .keyboard{
+      width:100%; max-width:520px;
+      display:flex; flex-direction:column; gap:8px; margin-bottom:28px;
+      user-select:none;
+    }
+    .key-row{display:flex; gap:6px; justify-content:center}
+    .key{
+      background:var(--key-bg); color:var(--key-text);
+      border:1px solid var(--key-border);
+      border-radius:6px; padding:12px 8px; min-width:32px;
+      text-transform:uppercase; font-weight:600; font-size:14px;
+      display:flex; align-items:center; justify-content:center;
+      cursor:pointer;
+    }
+    .key.wide{min-width:64px}
+    .key.correct{background:var(--color-correct); border-color:var(--color-correct)}
+    .key.present{background:var(--color-present); border-color:var(--color-present)}
+    .key.absent{background:var(--color-absent); border-color:var(--color-absent)}
+
+    /* Status / toast */
+    .toast{
+      min-height:24px;
+      display:flex; align-items:center; justify-content:center; text-align:center;
+      color:#e2e2e2; font-size:14px; opacity:.9;
+    }
+
+    /* Responsive tweaks */
+    @media (max-width:420px){
+      :root{ --tile-size:48px; }
+      header,main{padding-left:10px; padding-right:10px}
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Sixle</h1>
+    <button id="newBtn" title="Start a new game">↻ New Game</button>
+  </header>
+
+  <main>
+    <div id="board" class="board" aria-label="Game board" role="grid"></div>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <div class="keyboard" aria-label="Keyboard">
+      <div class="key-row" data-row="1"></div>
+      <div class="key-row" data-row="2"></div>
+      <div class="key-row" data-row="3"></div>
+    </div>
+  </main>
+
+  <script>
+  ;(()=>{
+
+    /*************** CONFIG ***************/
+    const WORD_LEN = 6;
+    const MAX_GUESSES = 6;
+
+    // 100 six-letter words (starter dictionary)
+    const WORDS = [
+      "abrupt","absorb","accept","across","action","active","admire","advise","afford","agenda",
+      "almost","amount","animal","annual","answer","appeal","appear","arrive","artist","aspect",
+      "assist","assume","assure","attach","attend","author","autumn","beacon","beauty","become",
+      "before","belief","belong","better","bottle","bottom","branch","bright","broken","budget",
+      "camera","cancel","cancer","carbon","career","castle","caught","center","charge","choose",
+      "chorus","client","closed","closer","combat","coming","commit","common","copper","corner",
+      "costly","county","couple","course","create","credit","crisis","custom","damage","danger",
+      "debate","decide","defeat","defend","define","degree","demand","depend","design","desire",
+      "detail","device","differ","dinner","direct","doctor","donate","double","driven","driver",
+      "editor","effect","effort","either","emerge","employ","enable","energy","engage","engine"
+    ].map(w => w.toUpperCase());
+
+    // Pick a new answer at random
+    let answer = pickAnswer();
+    let row = 0;
+    let col = 0;
+    let boardTiles = [];       // 2D array of tile elements [row][col]
+    let keyboardKeys = {};     // map letter -> key element
+    let gameOver = false;
+
+    /*** Setup ***/
+    const boardEl = document.getElementById('board');
+    const toastEl = document.getElementById('toast');
+    const newBtn = document.getElementById('newBtn');
+
+    buildBoard();
+    buildKeyboard();
+    setToast('Guess the 6-letter word. Good luck!');
+
+    window.addEventListener('keydown', onKeyDown);
+    newBtn.addEventListener('click', newGame);
+
+    /*************** UI BUILDERS ***************/
+    function buildBoard(){
+      // clear existing
+      boardEl.innerHTML = '';
+      boardTiles = [];
+      for(let r=0; r<MAX_GUESSES; r++){
+        const rowTiles = [];
+        for(let c=0; c<WORD_LEN; c++){
+          const t = document.createElement('div');
+          t.className = 'tile';
+          t.setAttribute('role','gridcell');
+          t.setAttribute('aria-label', `Row ${r+1} Col ${c+1}`);
+          boardEl.appendChild(t);
+          rowTiles.push(t);
+        }
+        boardTiles.push(rowTiles);
+      }
+    }
+
+    function buildKeyboard(){
+      const rows = [
+        "QWERTYUIOP",
+        "ASDFGHJKL",
+        "ENTERZXCVBNM⌫"
+      ];
+      const rowEls = document.querySelectorAll('.key-row');
+      rows.forEach((rowStr, idx) => {
+        rowEls[idx].innerHTML = '';
+        for(const ch of rowStr){
+          const key = document.createElement('div');
+          if(ch === '⌫'){
+            key.textContent = '⌫';
+            key.dataset.key = 'BACKSPACE';
+            key.className = 'key wide';
+          } else if (ch === 'E' && idx===2) {
+            // nothing
+          } else if (ch === 'E' && idx!==2) {
+            key.textContent = ch;
+            key.dataset.key = ch;
+            key.className = 'key';
+          }
+        }
+      });
+
+      // Build properly (the loop above was cautious; let's do explicit)
+      rowEls[0].innerHTML = '';
+      for(const ch of "QWERTYUIOP"){
+        const k = makeKey(ch);
+        rowEls[0].appendChild(k);
+      }
+      rowEls[1].innerHTML = '';
+      for(const ch of "ASDFGHJKL"){
+        const k = makeKey(ch);
+        rowEls[1].appendChild(k);
+      }
+      rowEls[2].innerHTML = '';
+      const enter = makeKey('ENTER'); enter.classList.add('wide');
+      rowEls[2].appendChild(enter);
+      for(const ch of "ZXCVBNM"){
+        const k = makeKey(ch);
+        rowEls[2].appendChild(k);
+      }
+      const back = makeKey('BACKSPACE'); back.textContent = '⌫'; back.classList.add('wide');
+      rowEls[2].appendChild(back);
+    }
+
+    function makeKey(label){
+      const el = document.createElement('div');
+      el.className = 'key';
+      el.textContent = (label==='ENTER' || label==='BACKSPACE') ? (label==='ENTER'?'Enter':'⌫') : label;
+      el.dataset.key = label;
+      el.addEventListener('click', ()=> handleKey(label));
+      if(label.length===1) keyboardKeys[label] = el;
+      return el;
+    }
+
+    /*************** INPUT ***************/
+    function onKeyDown(e){
+      if (gameOver) return;
+      const k = e.key;
+      if (/^[a-z]$/i.test(k)) {
+        handleKey(k.toUpperCase());
+      } else if (k === 'Backspace') {
+        handleKey('BACKSPACE');
+        e.preventDefault();
+      } else if (k === 'Enter') {
+        handleKey('ENTER');
+      }
+    }
+
+    function handleKey(k){
+      if (gameOver) return;
+
+      if (k === 'ENTER') {
+        commitGuess();
+        return;
+      }
+      if (k === 'BACKSPACE') {
+        if (col>0) {
+          col--;
+          const tile = boardTiles[row][col];
+          tile.textContent = '';
+          tile.classList.remove('filled','pop');
+        }
+        return;
+      }
+      // add letter
+      if (k.length === 1 && col < WORD_LEN) {
+        const tile = boardTiles[row][col];
+        tile.textContent = k;
+        tile.classList.add('filled','pop');
+        // remove pop so it can retrigger
+        setTimeout(()=> tile.classList.remove('pop'), 120);
+        col++;
+      }
+    }
+
+    /*************** GAME LOGIC ***************/
+    function commitGuess(){
+      if (col !== WORD_LEN) {
+        shakeRow(row);
+        setToast('Not enough letters.');
+        return;
+      }
+      const guess = boardTiles[row].map(t => t.textContent).join('');
+      if (!WORDS.includes(guess)) {
+        shakeRow(row);
+        setToast('Not in word list.');
+        return;
+      }
+      revealGuess(guess);
+    }
+
+    function revealGuess(guess){
+      const res = scoreGuess(guess, answer); // array of 'correct'|'present'|'absent'
+      // animate tiles with staggered flip
+      res.forEach((state, i) => {
+        const tile = boardTiles[row][i];
+        const letter = guess[i];
+        const key = keyboardKeys[letter];
+        const delay = i * 220;
+
+        setTimeout(() => {
+          tile.classList.add('flip');
+          // halfway through flip, paint state
+          setTimeout(() => {
+            tile.classList.add('revealed', state);
+            updateKeyColor(key, state);
+          }, 260);
+        }, delay);
+      });
+
+      // after all flips, evaluate end state
+      const totalDelay = res.length * 220 + 520;
+      setTimeout(() => {
+        if (res.every(s => s === 'correct')) {
+          celebrateRow(row);
+          setToast('Genius! You won.');
+          endGame(true);
+        } else if (row === MAX_GUESSES - 1) {
+          setToast(`Out of tries. Answer: ${answer}`);
+          endGame(false);
+        } else {
+          row++; col = 0;
+          setToast('');
+        }
+      }, totalDelay);
+    }
+
+    // Standard two-pass Wordle scoring with letter counts
+    function scoreGuess(guess, target){
+      const out = Array(WORD_LEN).fill('absent');
+      const tChars = target.split('');
+      const gChars = guess.split('');
+
+      // counts of remaining letters in target (after exact matches removed)
+      const counts = {};
+      for (let i=0;i<WORD_LEN;i++){
+        if (gChars[i] === tChars[i]) {
+          out[i] = 'correct';
+        } else {
+          counts[tChars[i]] = (counts[tChars[i]]||0) + 1;
+        }
+      }
+      // second pass: present if available in counts
+      for (let i=0;i<WORD_LEN;i++){
+        if (out[i] === 'correct') continue;
+        const ch = gChars[i];
+        if (counts[ch] > 0) {
+          out[i] = 'present';
+          counts[ch]--;
+        } // else remains 'absent'
+      }
+      return out;
+    }
+
+    function updateKeyColor(keyEl, state){
+      if (!keyEl) return;
+      const priority = { absent:0, present:1, correct:2 };
+      // Don't downgrade keys (e.g., from green -> yellow)
+      const current =
+        keyEl.classList.contains('correct') ? 'correct' :
+        keyEl.classList.contains('present') ? 'present' :
+        keyEl.classList.contains('absent') ? 'absent' : null;
+
+      if (!current || priority[state] > priority[current]) {
+        keyEl.classList.remove('correct','present','absent');
+        keyEl.classList.add(state);
+      }
+    }
+
+    function shakeRow(r){
+      const rowTiles = boardTiles[r];
+      const container = document.createElement('div');
+      container.className = 'row';
+      // Temporarily wrap for shake anim (CSS applies to .row)
+      rowTiles[0].parentNode.insertBefore(container, rowTiles[0]);
+      rowTiles.forEach(t => container.appendChild(t));
+      container.classList.add('shake');
+      setTimeout(()=> {
+        // unwrap
+        rowTiles.forEach(t => boardEl.insertBefore(t, container));
+        container.remove();
+      }, 420);
+    }
+
+    function celebrateRow(r){
+      const rowTiles = boardTiles[r];
+      rowTiles.forEach((t,i)=> setTimeout(()=> t.classList.add('bounce'), i*60));
+    }
+
+    function endGame(win){
+      gameOver = true;
+    }
+
+    function newGame(){
+      answer = pickAnswer();
+      row = 0; col = 0; gameOver = false;
+      buildBoard();
+      // reset keyboard colors
+      Object.values(keyboardKeys).forEach(k => k.classList.remove('correct','present','absent'));
+      setToast('New word! Guess the 6-letter word.');
+    }
+
+    function pickAnswer(){
+      return WORDS[Math.floor(Math.random()*WORDS.length)];
+    }
+
+    function setToast(msg){
+      toastEl.textContent = msg;
+    }
+
+  })();
+  </script>
+</body>
+</html>
